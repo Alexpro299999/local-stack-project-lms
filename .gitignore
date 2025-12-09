@@ -1,0 +1,9 @@
+data/
+volume/
+docker_logs.txt
+.env
+.venv/
+__pycache__/
+*.pyc
+airflow/logs/
+airflow/logs/scheduler/latest
