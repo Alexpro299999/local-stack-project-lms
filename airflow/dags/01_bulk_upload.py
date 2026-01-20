@@ -1,45 +1,78 @@
 import os
 import glob
+import logging
 import boto3
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+from airflow.decorators import dag, task
 from datetime import datetime
+from typing import List
 
-def upload_files_to_s3():
-    s3_endpoint = 'http://localstack:4566'
-    access_key = 'test'
-    secret_key = 'test'
-    bucket_name = 'my-helsinki-bikes-bucket'
-    source_dir = '/opt/airflow/data/processed'
-
-    s3 = boto3.client(
-        's3',
-        endpoint_url=s3_endpoint,
-        aws_access_key_id=access_key,
-        aws_secret_access_key=secret_key,
-        region_name='us-east-1'
+try:
+    from dag_config import (
+        S3_ENDPOINT, AWS_CREDS, BUCKET_NAME,
+        PROCESSED_DIR, RAW_PREFIX
+    )
+except ImportError:
+    from airflow.dags.dag_config import (
+        S3_ENDPOINT, AWS_CREDS, BUCKET_NAME,
+        PROCESSED_DIR, RAW_PREFIX
     )
 
-    try:
-        s3.create_bucket(Bucket=bucket_name)
-    except Exception:
-        pass
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-    files = glob.glob(os.path.join(source_dir, '*.csv'))
 
-    for file_path in files:
-        file_name = os.path.basename(file_path)
-        print(f"Uploading {file_name} to s3://{bucket_name}/raw/")
-        s3.upload_file(file_path, bucket_name, f"raw/{file_name}")
-
-with DAG(
-    dag_id='01_bulk_upload_to_s3',
+@dag(
+    dag_id='01_bulk_upload_to_s3_v6',
     start_date=datetime(2023, 1, 1),
-    schedule_interval=None,
-    catchup=False
-) as dag:
+    schedule=None,
+    catchup=False,
+    tags=['s3', 'upload']
+)
+def bulk_upload_dag():
+    """
+    dag to upload all csv files to s3 using dynamic task mapping.
+    """
 
-    upload_task = PythonOperator(
-        task_id='upload_all_files',
-        python_callable=upload_files_to_s3
-    )
+    @task
+    def ensure_bucket():
+        """
+        checks if bucket exists and creates it if necessary.
+        """
+        s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, **AWS_CREDS)
+        try:
+            s3.head_bucket(Bucket=BUCKET_NAME)
+            logger.info(f"bucket {BUCKET_NAME} exists")
+        except Exception:
+            logger.info(f"creating bucket {BUCKET_NAME}")
+            s3.create_bucket(Bucket=BUCKET_NAME)
+
+    @task
+    def get_file_list() -> List[str]:
+        """
+        scans the directory and returns a list of csv file paths.
+        """
+        files = glob.glob(os.path.join(PROCESSED_DIR, '*.csv'))
+        logger.info(f"found {len(files)} files to upload")
+        return files
+
+    @task
+    def upload_single_file(file_path: str):
+        """
+        uploads a single file to s3.
+        """
+        s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, **AWS_CREDS)
+
+        file_name = os.path.basename(file_path)
+        object_key = f"{RAW_PREFIX}/{file_name}"
+
+        logger.info(f"uploading {file_name} to {BUCKET_NAME}/{object_key}")
+        s3.upload_file(file_path, BUCKET_NAME, object_key)
+
+    bucket_ready = ensure_bucket()
+    files_to_process = get_file_list()
+
+    upload_tasks = upload_single_file.expand(file_path=files_to_process)
+    bucket_ready >> files_to_process >> upload_tasks
+
+
+bulk_upload_dag()

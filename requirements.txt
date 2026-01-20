@@ -2,3 +2,5 @@ boto3
 awscli-local
 pandas
 python-dotenv
+pyspark>=3.4.0
+apache-airflow>=2.7.0

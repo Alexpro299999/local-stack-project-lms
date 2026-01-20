@@ -1,47 +1,52 @@
 import boto3
 import json
+import logging
+import sys
+from script_config import (
+    S3_ENDPOINT, AWS_REGION, AWS_CREDS,
+    BUCKET_NAME, SNS_TOPIC_NAME, SQS_QUEUE_NAME, DYNAMO_TABLE_NAME
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 def setup_infra():
-    endpoint_url = 'http://localhost:4566'
-    region = 'us-east-1'
-    creds = {'aws_access_key_id': 'test', 'aws_secret_access_key': 'test'}
-    
-    s3 = boto3.client('s3', endpoint_url=endpoint_url, region_name=region, **creds)
-    sns = boto3.client('sns', endpoint_url=endpoint_url, region_name=region, **creds)
-    sqs = boto3.client('sqs', endpoint_url=endpoint_url, region_name=region, **creds)
-    dynamodb = boto3.client('dynamodb', endpoint_url=endpoint_url, region_name=region, **creds)
+    """
+    creates s3 buckets, sns topics, sqs queues, and dynamodb tables.
+    """
+    s3 = boto3.client('s3', endpoint_url=S3_ENDPOINT, **AWS_CREDS)
+    sns = boto3.client('sns', endpoint_url=S3_ENDPOINT, **AWS_CREDS)
+    sqs = boto3.client('sqs', endpoint_url=S3_ENDPOINT, **AWS_CREDS)
+    dynamodb = boto3.client('dynamodb', endpoint_url=S3_ENDPOINT, **AWS_CREDS)
 
-    bucket_name = 'my-helsinki-bikes-bucket'
-    topic_name = 'BikesUploadTopic'
-    queue_name = 'BikesProcessingQueue'
-    table_name = 'HelsinkiDailyMetrics'
-
-    print("Creating S3 Bucket...")
+    logger.info("creating s3 bucket...")
     try:
-        s3.create_bucket(Bucket=bucket_name)
+        s3.create_bucket(Bucket=BUCKET_NAME)
+        logger.info(f"bucket {BUCKET_NAME} created or exists")
     except Exception:
         pass
 
-    print("1. Creating SNS Topic...")
-    topic_response = sns.create_topic(Name=topic_name)
+    logger.info("creating sns topic...")
+    topic_response = sns.create_topic(Name=SNS_TOPIC_NAME)
     topic_arn = topic_response['TopicArn']
-    print(f"Topic created: {topic_arn}")
+    logger.info(f"topic created: {topic_arn}")
 
-    print("2. Creating SQS Queue...")
-    queue_response = sqs.create_queue(QueueName=queue_name)
+    logger.info("creating sqs queue...")
+    queue_response = sqs.create_queue(QueueName=SQS_QUEUE_NAME)
     queue_url = queue_response['QueueUrl']
-    
+
     queue_attrs = sqs.get_queue_attributes(QueueUrl=queue_url, AttributeNames=['QueueArn'])
     queue_arn = queue_attrs['Attributes']['QueueArn']
-    print(f"Queue created: {queue_url}")
+    logger.info(f"queue created: {queue_url}")
 
-    print("3. Subscribing SQS to SNS...")
+    logger.info("subscribing sqs to sns...")
     sns.subscribe(
         TopicArn=topic_arn,
         Protocol='sqs',
         Endpoint=queue_arn
     )
-    
+
     policy = {
         "Version": "2012-10-17",
         "Id": "SNStoSQS",
@@ -64,9 +69,9 @@ def setup_infra():
         QueueUrl=queue_url,
         Attributes={'Policy': json.dumps(policy)}
     )
-    print("Subscription active.")
+    logger.info("subscription active.")
 
-    print("4. Configuring S3 Notifications...")
+    logger.info("configuring s3 notifications...")
     notification_config = {
         'TopicConfigurations': [
             {
@@ -76,18 +81,18 @@ def setup_infra():
         ]
     }
     s3.put_bucket_notification_configuration(
-        Bucket=bucket_name,
+        Bucket=BUCKET_NAME,
         NotificationConfiguration=notification_config
     )
-    print("S3 Notifications configured.")
+    logger.info("s3 notifications configured.")
 
-    print("5. Creating DynamoDB Table...")
+    logger.info("creating dynamodb table...")
     try:
         dynamodb.create_table(
-            TableName=table_name,
+            TableName=DYNAMO_TABLE_NAME,
             KeySchema=[
-                {'AttributeName': 'date', 'KeyType': 'HASH'}, 
-                {'AttributeName': 'metric_type', 'KeyType': 'RANGE'} 
+                {'AttributeName': 'date', 'KeyType': 'HASH'},
+                {'AttributeName': 'metric_type', 'KeyType': 'RANGE'}
             ],
             AttributeDefinitions=[
                 {'AttributeName': 'date', 'AttributeType': 'S'},
@@ -98,11 +103,12 @@ def setup_infra():
                 'WriteCapacityUnits': 5
             }
         )
-        print(f"Table {table_name} created.")
+        logger.info(f"table {DYNAMO_TABLE_NAME} created.")
     except Exception:
         pass
 
-    print("\nInfrastructure setup complete!")
+    logger.info("infrastructure setup complete!")
+
 
 if __name__ == "__main__":
     setup_infra()

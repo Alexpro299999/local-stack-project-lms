@@ -26,7 +26,9 @@ services:
       - "/var/run/docker.sock:/var/run/docker.sock"
 
   airflow:
-    image: apache/airflow:2.7.3
+    build:
+      context: .
+      dockerfile: airflow/Dockerfile
     container_name: airflow_main
     networks:
       - helsinki-net
@@ -39,13 +41,14 @@ services:
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
       - AWS_ENDPOINT_URL=http://localstack_main:4566
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
     volumes:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
       - ./data:/opt/airflow/data
     ports:
-      - "8080:8080"
-    command: bash -c "pip install boto3 pandas && airflow db init && airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com && airflow standalone"
+      - "8081:8080"
+    command: bash -c "airflow db init && airflow users create --username airflow --password airflow --firstname Admin --lastname User --role Admin --email admin@example.com && airflow standalone"
     depends_on:
       - localstack

@@ -1,32 +1,51 @@
 import boto3
+import logging
+from script_config import (
+    AWS_ACCESS_KEY, AWS_SECRET_KEY, AWS_REGION, S3_ENDPOINT,
+    SQS_QUEUE_NAME
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 def status():
-    endpoint = 'http://localhost:4566'
-    creds = {'aws_access_key_id': 'test', 'aws_secret_access_key': 'test', 'region_name': 'us-east-1'}
-    
-    sqs = boto3.client('sqs', endpoint_url=endpoint, **creds)
-    lambda_client = boto3.client('lambda', endpoint_url=endpoint, **creds)
-    
-    print(" SQS STATUS ")
-    try:
-        q_url = sqs.get_queue_url(QueueName='BikesProcessingQueue')['QueueUrl']
-        attrs = sqs.get_queue_attributes(QueueUrl=q_url, AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible'])
-        print(f"Queue URL: {q_url}")
-        print(f"Messages Available: {attrs['Attributes']['ApproximateNumberOfMessages']}")
-        print(f"Messages in Flight (Processing): {attrs['Attributes']['ApproximateNumberOfMessagesNotVisible']}")
-    except Exception as e:
-        print(f"Error checking SQS: {e}")
+    """
+    checks and logs the status of sqs queues and lambda event source mappings.
+    """
+    creds = {
+        'aws_access_key_id': AWS_ACCESS_KEY,
+        'aws_secret_access_key': AWS_SECRET_KEY,
+        'region_name': AWS_REGION
+    }
 
-    print("\n TRIGGER STATUS ")
+    sqs = boto3.client('sqs', endpoint_url=S3_ENDPOINT, **creds)
+    lambda_client = boto3.client('lambda', endpoint_url=S3_ENDPOINT, **creds)
+
+    logger.info(" sqs status ")
+    try:
+        q_url = sqs.get_queue_url(QueueName=SQS_QUEUE_NAME)['QueueUrl']
+        attrs = sqs.get_queue_attributes(
+            QueueUrl=q_url,
+            AttributeNames=['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
+        )
+        logger.info(f"queue: {SQS_QUEUE_NAME}")
+        logger.info(f"messages available: {attrs['Attributes']['ApproximateNumberOfMessages']}")
+        logger.info(f"messages in flight: {attrs['Attributes']['ApproximateNumberOfMessagesNotVisible']}")
+    except Exception as e:
+        logger.error(f"error checking sqs: {e}")
+
+    logger.info("\n trigger status ")
     try:
         mappings = lambda_client.list_event_source_mappings()
         if not mappings['EventSourceMappings']:
-            print("No triggers found!")
+            logger.info("no triggers found!")
         for m in mappings['EventSourceMappings']:
-            print(f"State: {m['State']}")
-            print(f"Last Result: {m.get('LastProcessingResult', 'None')}")
+            logger.info(f"state: {m['State']}")
+            logger.info(f"function: {m['FunctionArn']}")
     except Exception as e:
-        print(f"Error checking triggers: {e}")
+        logger.error(f"error checking triggers: {e}")
+
 
 if __name__ == "__main__":
     status()
